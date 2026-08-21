@@ -1,36 +1,38 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+Main Submission Write-up (`README.md`)
+আপনার প্রজেক্টের রুট ডিরেক্টরির `README.md` ফাইলে এই টেক্সটটি পেস্ট করে দিন:
 
-## Getting Started
+```markdown
+# PulseChat - Real-Time Chat Engine
 
-First, run the development server:
+A full-featured real-time messaging web application supporting 1-to-1 direct messaging, group chat management, smart auto-scroll, and live updates via Socket.io.
+
+## Architecture & Tech Stack
+- **Framework:** Next.js 16 (App Router, TypeScript)
+- **Styling:** Tailwind CSS
+- **State Management:** React Hooks & State Sync
+- **Networking:** Axios API Client with JWT Bearer Interceptors
+- **Real-time Sync:** Socket.io Client
+
+## Thought Process & Design Decisions
+
+### 1. Smart Auto-Scroll Behavior
+- Implemented via a container scroll listener tracking `scrollHeight - scrollTop - clientHeight`.
+- Automatically snaps to bottom when a new message arrives *if* the user is already near the bottom.
+- If the user has scrolled up to inspect older messages, incoming messages will not disrupt their reading position.
+
+### 2. Group Management & Administration
+- Clean separation of direct conversations and group chats.
+- Group creators maintain admin privileges allowing dynamic renaming and participant addition via dedicated endpoints.
+
+### 3. API Resilience & Token Handling
+- Centralized Axios instance injects JWT authorization headers smoothly.
+- Real-time fallback ensures seamless socket connection maintenance during chat transitions.
+
+## How to Run Locally
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+# 1. Install dependencies
+npm install
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+# 2. Run local server
+npm run dev# chat-app
