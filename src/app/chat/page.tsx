@@ -153,14 +153,13 @@ export default function ChatPage() {
     }
   };
 
-  const sendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!text.trim() || !activeChat) return;
+  const sendMessage = async (textValue: string) => {
+    if (!textValue.trim() || !activeChat) return;
 
     const activeId = activeChat.id || activeChat._id;
     const messagePayload = {
       conversationId: activeId,
-      text: text,
+      text: textValue,
     };
 
     if (socketRef.current) {
@@ -187,27 +186,28 @@ export default function ChatPage() {
       console.error('Send Message REST Error:', err);
     }
 
-    setText('');
     fetchConversations();
   };
 
-  // নিখুঁতভাবে অপর ইউজারের নাম বা ফোন নম্বর বের করার ফাংশন
+  // নিখুঁতভাবে অপর ইউজারের নাম বের করার ফাংশন
   const getConversationName = (c: any) => {
     if (c.name) return c.name; // গ্রুপ হলে গ্রুপের নাম দেখাবে
     
     if (c.participants && Array.isArray(c.participants)) {
-      const otherParticipant = c.participants.find((p: any) => {
+      // পার্টিসিপেন্টস অ্যারে থেকে লগইন করা ইউজার বাদে অন্যজনকে খুঁজে বের করা
+      const other = c.participants.find((p: any) => {
         const pId = typeof p === 'string' ? p : (p._id || p.id);
         return pId && pId !== currentUserId;
       });
 
-      if (otherParticipant) {
-        if (typeof otherParticipant === 'object') {
-          return otherParticipant.name || otherParticipant.phone || 'Direct Chat';
+      if (other) {
+        if (typeof other === 'object') {
+          return other.name || other.phone || 'Chat';
         }
+        return `User ${other.slice(-4)}`; // যদি শুধু আইডি থাকে
       }
     }
-    return 'Direct Chat';
+    return 'Chat';
   };
 
   return (
@@ -290,37 +290,51 @@ export default function ChatPage() {
               <h2 className="font-bold text-white text-sm">{getConversationName(activeChat)}</h2>
             </header>
 
+            {/* Message List */}
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
               {messages.map((msg, idx) => {
                 const senderObj = msg.sender;
                 const senderId = typeof senderObj === 'string' ? senderObj : (senderObj?._id || senderObj?.id);
-                const isMe = senderId === currentUserId;
+                const isMine = senderId === currentUserId;
 
                 return (
-                  <div key={msg.id || msg._id || idx} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-xs md:max-w-md px-4 py-2 rounded-2xl text-sm ${isMe ? 'bg-violet-600 text-white' : 'bg-[#1E2436] text-slate-200'}`}>
-                      {msg.text}
+                  <div key={msg.id || msg._id || idx} className={`flex flex-col ${isMine ? 'items-end' : 'items-start'}`}>
+                    <div className={`max-w-[75%] rounded-2xl px-4 py-2 text-sm leading-relaxed ${isMine ? 'bg-violet-600 text-white rounded-br-sm' : 'bg-[#1E2436] border border-[#2A324B] text-slate-200 rounded-bl-sm'}`}>
+                      <p className="whitespace-pre-wrap break-words">{msg.text || msg.content}</p>
                     </div>
                   </div>
                 );
               })}
             </div>
 
-            <form onSubmit={sendMessage} className="p-4 border-t border-[#1E2436] bg-[#121829] flex gap-2">
-              <input
-                type="text"
-                placeholder="Type a message..."
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                className="flex-1 bg-[#1E2436] border border-[#2A324B] rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-violet-500"
-              />
-              <button
-                type="submit"
-                className="bg-violet-600 hover:bg-violet-500 text-white px-5 py-2.5 rounded-xl text-sm font-semibold transition-all cursor-pointer"
-              >
-                Send
-              </button>
-            </form>
+            {/* Message Input Component */}
+            <div className="p-3 bg-[#121829] border-t border-[#1E2436]">
+              <div className="flex items-end gap-2">
+                <input
+                  type="text"
+                  placeholder="Type a message..."
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      sendMessage(text);
+                      setText('');
+                    }
+                  }}
+                  className="flex-1 bg-[#1E2436] border border-[#2A324B] rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-violet-500"
+                />
+                <button
+                  onClick={() => {
+                    sendMessage(text);
+                    setText('');
+                  }}
+                  className="bg-violet-600 hover:bg-violet-500 text-white px-5 py-2.5 rounded-xl text-sm font-semibold transition-all cursor-pointer"
+                >
+                  Send
+                </button>
+              </div>
+            </div>
           </>
         ) : (
           <div className="flex-1 flex items-center justify-center text-slate-500 p-8 text-center">
