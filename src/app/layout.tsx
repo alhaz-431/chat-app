@@ -19,13 +19,13 @@ export const metadata: Metadata = {
   description: "Real-time 1-to-1 and group messaging.",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html
       lang="en"
-      className={`${display.variable} ${body.variable} h-full antialiased`}
+      className={`${display.variable} ${body.variable} h-full antialiased overflow-x-hidden`}
     >
-      <body className="min-h-full flex flex-col font-sans">
+      <body className="min-h-full flex flex-col font-sans overflow-x-hidden bg-[#0B0F17] text-slate-100">
         {children}
         <Toaster position="top-center" />
       </body>
