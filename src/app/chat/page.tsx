@@ -15,9 +15,10 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<any[]>([]);
   const [text, setText] = useState('');
   
-  // Search States
+  // Search & Cache States for User Names
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [userCache, setUserCache] = useState<{ [key: string]: { name: string; phone: string } }>({});
   const [isLoading, setIsLoading] = useState(true);
 
   const router = useRouter();
@@ -115,6 +116,16 @@ export default function ChatPage() {
       const data = Array.isArray(res.data) 
         ? res.data 
         : res.data?.users || res.data?.data || [];
+      
+      // Cache searched users so we can display their names instantly in the sidebar
+      const newCache = { ...userCache };
+      data.forEach((u: any) => {
+        const uId = u.id || u._id;
+        if (uId) {
+          newCache[uId] = { name: u.name, phone: u.phone };
+        }
+      });
+      setUserCache(newCache);
       setSearchResults(data);
     } catch (err) {
       console.error('User Search Error:', err);
@@ -122,10 +133,18 @@ export default function ChatPage() {
     }
   };
 
-  const startDirectChat = async (userId: string) => {
-    if (!userId) return;
+  const startDirectChat = async (userObj: any) => {
+    const targetUserId = userObj.id || userObj._id;
+    if (!targetUserId) return;
+
+    // Cache user info immediately
+    setUserCache((prev) => ({
+      ...prev,
+      [targetUserId]: { name: userObj.name, phone: userObj.phone }
+    }));
+
     try {
-      const res = await api.post('/conversations', { userId });
+      const res = await api.post('/conversations', { userId: targetUserId });
       const chatData = res.data;
       
       await fetchConversations();
@@ -153,13 +172,14 @@ export default function ChatPage() {
     }
   };
 
-  const sendMessage = async (textValue: string) => {
-    if (!textValue.trim() || !activeChat) return;
+  const sendMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!text.trim() || !activeChat) return;
 
     const activeId = activeChat.id || activeChat._id;
     const messagePayload = {
       conversationId: activeId,
-      text: textValue,
+      text: text,
     };
 
     if (socketRef.current) {
@@ -186,28 +206,32 @@ export default function ChatPage() {
       console.error('Send Message REST Error:', err);
     }
 
+    setText('');
     fetchConversations();
   };
 
-  // নিখুঁতভাবে অপর ইউজারের নাম বের করার ফাংশন
+  // নিখুঁতভাবে ইউজারের নাম খুঁজে বের করার লজিক (캐শ ও পার্টিসিপেন্টস চেক করে)
   const getConversationName = (c: any) => {
-    if (c.name) return c.name; // গ্রুপ হলে গ্রুপের নাম দেখাবে
-    
+    if (c.name) return c.name; // গ্রুপ চ্যাট হলে গ্রুপের নাম
+    if (c.user && c.user.name) return c.user.name;
+
     if (c.participants && Array.isArray(c.participants)) {
-      // পার্টিসিপেন্টস অ্যারে থেকে লগইন করা ইউজার বাদে অন্যজনকে খুঁজে বের করা
-      const other = c.participants.find((p: any) => {
+      const otherParticipant = c.participants.find((p: any) => {
         const pId = typeof p === 'string' ? p : (p._id || p.id);
         return pId && pId !== currentUserId;
       });
 
-      if (other) {
-        if (typeof other === 'object') {
-          return other.name || other.phone || 'Chat';
+      if (otherParticipant) {
+        if (typeof otherParticipant === 'object' && otherParticipant.name) {
+          return otherParticipant.name;
         }
-        return `User ${other.slice(-4)}`; // যদি শুধু আইডি থাকে
+        const pId = typeof otherParticipant === 'string' ? otherParticipant : (otherParticipant._id || otherParticipant.id);
+        if (pId && userCache[pId]) {
+          return userCache[pId].name; // সার্চ ক্যাশ থেকে নাম বের করে দেওয়া
+        }
       }
     }
-    return 'Chat';
+    return 'Direct Chat';
   };
 
   return (
@@ -237,7 +261,7 @@ export default function ChatPage() {
               {searchResults.map((u, idx) => (
                 <div
                   key={u.id || u._id || idx}
-                  onClick={() => startDirectChat(u.id || u._id)}
+                  onClick={() => startDirectChat(u)}
                   className="p-3 hover:bg-[#1E2436] cursor-pointer flex flex-col"
                 >
                   <p className="font-semibold text-sm text-slate-100">{u.name}</p>
@@ -290,7 +314,6 @@ export default function ChatPage() {
               <h2 className="font-bold text-white text-sm">{getConversationName(activeChat)}</h2>
             </header>
 
-            {/* Message List */}
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
               {messages.map((msg, idx) => {
                 const senderObj = msg.sender;
@@ -298,43 +321,30 @@ export default function ChatPage() {
                 const isMine = senderId === currentUserId;
 
                 return (
-                  <div key={msg.id || msg._id || idx} className={`flex flex-col ${isMine ? 'items-end' : 'items-start'}`}>
-                    <div className={`max-w-[75%] rounded-2xl px-4 py-2 text-sm leading-relaxed ${isMine ? 'bg-violet-600 text-white rounded-br-sm' : 'bg-[#1E2436] border border-[#2A324B] text-slate-200 rounded-bl-sm'}`}>
-                      <p className="whitespace-pre-wrap break-words">{msg.text || msg.content}</p>
+                  <div key={msg.id || msg._id || idx} className={`flex ${isMine ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`max-w-xs md:max-w-md px-4 py-2 rounded-2xl text-sm ${isMine ? 'bg-violet-600 text-white' : 'bg-[#1E2436] text-slate-200'}`}>
+                      {msg.text || msg.content}
                     </div>
                   </div>
                 );
               })}
             </div>
 
-            {/* Message Input Component */}
-            <div className="p-3 bg-[#121829] border-t border-[#1E2436]">
-              <div className="flex items-end gap-2">
-                <input
-                  type="text"
-                  placeholder="Type a message..."
-                  value={text}
-                  onChange={(e) => setText(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      sendMessage(text);
-                      setText('');
-                    }
-                  }}
-                  className="flex-1 bg-[#1E2436] border border-[#2A324B] rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-violet-500"
-                />
-                <button
-                  onClick={() => {
-                    sendMessage(text);
-                    setText('');
-                  }}
-                  className="bg-violet-600 hover:bg-violet-500 text-white px-5 py-2.5 rounded-xl text-sm font-semibold transition-all cursor-pointer"
-                >
-                  Send
-                </button>
-              </div>
-            </div>
+            <form onSubmit={sendMessage} className="p-4 border-t border-[#1E2436] bg-[#121829] flex gap-2">
+              <input
+                type="text"
+                placeholder="Type a message..."
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                className="flex-1 bg-[#1E2436] border border-[#2A324B] rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-violet-500"
+              />
+              <button
+                type="submit"
+                className="bg-violet-600 hover:bg-violet-500 text-white px-5 py-2.5 rounded-xl text-sm font-semibold transition-all cursor-pointer"
+              >
+                Send
+              </button>
+            </form>
           </>
         ) : (
           <div className="flex-1 flex items-center justify-center text-slate-500 p-8 text-center">
