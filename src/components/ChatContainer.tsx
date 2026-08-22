@@ -11,10 +11,12 @@ interface Sender {
 interface Message {
   _id?: string;
   id?: string;
-  text: string;
+  text?: string;
+  mediaUrl?: string; // মিডিয়া বা ইমেজ শেয়ারিংয়ের জন্য
   senderId?: string;
   sender?: Sender;
   createdAt?: string;
+  status?: 'sent' | 'delivered' | 'seen'; // রিড রিসিপ্টের জন্য
 }
 
 interface ChatContainerProps {
@@ -77,10 +79,20 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                     : 'bg-[#1E2436] text-slate-200 border border-[#2A324B] rounded-bl-xs'
                 }`}
               >
-                {msg.text}
+                {/* Text Message */}
+                {msg.text && <p className="break-words">{msg.text}</p>}
+
+                {/* Media / Image Display */}
+                {msg.mediaUrl && (
+                  <img
+                    src={msg.mediaUrl}
+                    alt="Shared media"
+                    className="mt-2 rounded-lg max-h-48 object-cover w-full"
+                  />
+                )}
               </div>
 
-              {/* Time & Status */}
+              {/* Time & Read Receipt (Ticks) */}
               <div className="flex items-center gap-1 mt-1 px-1">
                 <span className="text-[10px] text-slate-500">
                   {msg.createdAt
@@ -90,7 +102,16 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                       })
                     : 'Just now'}
                 </span>
-                {isSent && <span className="text-[11px] text-violet-400 font-bold">✓</span>}
+                {isSent && (
+                  <span
+                    className={`text-[11px] font-bold ${
+                      msg.status === 'seen' ? 'text-sky-400' : 'text-slate-400'
+                    }`}
+                    title={msg.status || 'sent'}
+                  >
+                    {msg.status === 'seen' ? '✓✓' : '✓'}
+                  </span>
+                )}
               </div>
             </div>
           );

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { api } from '@/lib/api';
@@ -16,6 +16,11 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<any[]>([]);
   const [text, setText] = useState('');
   
+  // Real-time Status States
+  const [isTyping, setIsTyping] = useState(false);
+  const [isOnline, setIsOnline] = useState(false);
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
   // UI & Search States
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
@@ -24,7 +29,7 @@ export default function ChatPage() {
   
   const router = useRouter();
 
-  // 1. Auth & Initial Load (Extracting current logged-in User ID)
+  // 1. Auth & Initial Load
   useEffect(() => {
     const savedToken = localStorage.getItem('token');
     
@@ -48,7 +53,7 @@ export default function ChatPage() {
 
   const socket = useSocket(token) as any;
 
-  // 2. Real-time Socket Event Handlers
+  // 2. Real-time Socket Event Handlers & Typing/Online Listeners
   useEffect(() => {
     if (!socket) return;
 
@@ -58,16 +63,56 @@ export default function ChatPage() {
       const activeId = activeChat?.id || activeChat?._id;
       if (activeChat && newMessage.conversationId === activeId) {
         setMessages((prev) => [...prev, newMessage]);
+        
+        // ছোট সাউন্ড নোটিফিকেশন (যদি মেসেজ অন্য কারও কাছ থেকে আসে)
+        const senderId = newMessage.sender?._id || newMessage.sender?.id || newMessage.sender;
+        if (senderId !== currentUserId) {
+          playNotificationSound();
+        }
       }
       fetchConversations();
+    });
+
+    // টাইপিং ইন্ডিকেটর লিসেন করা
+    currentSocket.on('typing:display', (data: { conversationId: string; userId: string; isTyping: boolean }) => {
+      const activeId = activeChat?.id || activeChat?._id;
+      if (activeChat && data.conversationId === activeId && data.userId !== currentUserId) {
+        setIsTyping(data.isTyping);
+      }
+    });
+
+    // অনলাইন স্ট্যাটাস লিসেন করা
+    currentSocket.on('user:status', (data: { userId: string; isOnline: boolean }) => {
+      if (activeChat && !activeChat.isGroup) {
+        const otherParticipant = activeChat.participants?.find(
+          (p: any) => (p._id || p.id || p) !== currentUserId
+        );
+        const otherId = otherParticipant?._id || otherParticipant?.id || otherParticipant;
+        if (otherId === data.userId) {
+          setIsOnline(data.isOnline);
+        }
+      }
     });
 
     return () => {
       if (currentSocket && typeof currentSocket.off === 'function') {
         currentSocket.off('message:new');
+        currentSocket.off('typing:display');
+        currentSocket.off('user:status');
       }
     };
-  }, [socket, activeChat]);
+  }, [socket, activeChat, currentUserId]);
+
+  // নোটিফিকেশন সাউন্ড বাজানোর ফাংশন
+  const playNotificationSound = () => {
+    try {
+      const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+      audio.volume = 0.5;
+      audio.play().catch((err) => console.log('Audio play error:', err));
+    } catch (e) {
+      console.log('Sound error:', e);
+    }
+  };
 
   // 3. API Calls
   const fetchConversations = async () => {
@@ -132,13 +177,46 @@ export default function ChatPage() {
     }
   };
 
+  // ইনপুটে টাইপ করার সময় সকেটের মাধ্যমে টাইপিং সিগন্যাল পাঠানো
+  const handleTypingInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setText(e.target.value);
+
+    if (socket && activeChat) {
+      const activeId = activeChat.id || activeChat._id;
+      
+      (socket as any).emit('typing', {
+        conversationId: activeId,
+        isTyping: true,
+      });
+
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+
+      typingTimeoutRef.current = setTimeout(() => {
+        (socket as any).emit('typing', {
+          conversationId: activeId,
+          isTyping: false,
+        });
+      }, 2000);
+    }
+  };
+
   const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!text.trim() || !activeChat) return;
 
+    const activeId = activeChat.id || activeChat._id;
+
+    // টাইপিং বন্ধ করে দেওয়া মেসেজ পাঠানোর সময়
+    if (socket) {
+      (socket as any).emit('typing', {
+        conversationId: activeId,
+        isTyping: false,
+      });
+    }
+
     try {
       const res = await api.post('/messages', {
-        conversationId: activeChat.id || activeChat._id,
+        conversationId: activeId,
         text,
       });
       setMessages((prev) => [...prev, res.data]);
@@ -153,13 +231,12 @@ export default function ChatPage() {
 
   return (
     <div className="flex h-screen bg-[#0B0E17] text-slate-100 font-sans overflow-hidden">
-      {/* Sidebar - Conversations & Direct Search */}
+      {/* Sidebar */}
       <aside
         className={`w-full md:w-80 lg:w-96 border-r border-[#1E2436] bg-[#121829] flex flex-col z-20 transition-all duration-300 ${
           activeChat ? 'hidden md:flex' : 'flex'
         }`}
       >
-        {/* Header */}
         <div className="p-4 border-b border-[#1E2436] flex justify-between items-center bg-[#121829]">
           <div className="flex items-center gap-3">
             <Link
@@ -173,7 +250,6 @@ export default function ChatPage() {
             <h1 className="text-lg font-bold text-white tracking-wide">Chats</h1>
           </div>
 
-          {/* Group Creation Button */}
           <button
             onClick={() => setIsGroupModalOpen(true)}
             className="flex items-center gap-1 px-3 py-1.5 bg-violet-600 hover:bg-violet-500 text-white rounded-xl text-xs font-semibold transition-all shadow-md shadow-violet-600/30 active:scale-95"
@@ -182,7 +258,6 @@ export default function ChatPage() {
           </button>
         </div>
 
-        {/* User Search for 1-to-1 Chat */}
         <div className="p-4 relative">
           <div className="relative">
             <svg className="w-4 h-4 absolute left-3.5 top-3 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -197,7 +272,6 @@ export default function ChatPage() {
             />
           </div>
 
-          {/* User Search Dropdown */}
           {searchResults.length > 0 && (
             <div className="absolute left-4 right-4 top-16 bg-[#121829] border border-[#2A324B] rounded-2xl mt-1 max-h-56 overflow-y-auto shadow-2xl z-50 divide-y divide-[#1E2436]">
               {searchResults.map((u, idx) => (
@@ -219,7 +293,6 @@ export default function ChatPage() {
           )}
         </div>
 
-        {/* Conversation List */}
         <div className="flex-1 overflow-y-auto p-3 space-y-2">
           {isLoading ? (
             <div className="p-8 text-center text-xs text-slate-500 flex flex-col items-center gap-2">
@@ -240,6 +313,7 @@ export default function ChatPage() {
                   key={c.id || c._id || idx}
                   onClick={() => {
                     setActiveChat(c);
+                    setIsTyping(false);
                     fetchMessages(c.id || c._id);
                   }}
                   className={`p-3 rounded-2xl cursor-pointer transition-all flex items-center gap-3 ${
@@ -288,11 +362,14 @@ export default function ChatPage() {
       >
         {activeChat ? (
           <>
-            {/* Active Chat Header */}
+            {/* Active Chat Header with Online Dot & Typing Status */}
             <header className="p-3.5 md:p-4 border-b border-[#1E2436] bg-[#121829] flex items-center justify-between z-10">
               <div className="flex items-center gap-3">
                 <button
-                  onClick={() => setActiveChat(null)}
+                  onClick={() => {
+                    setActiveChat(null);
+                    setIsTyping(false);
+                  }}
                   className="md:hidden p-2 rounded-xl bg-[#1E2436] border border-[#2A324B] text-slate-300"
                 >
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -300,8 +377,17 @@ export default function ChatPage() {
                   </svg>
                 </button>
 
-                <div className="w-10 h-10 rounded-full bg-violet-600/20 border border-violet-500/40 flex items-center justify-center font-bold text-violet-300">
-                  {activeChat.isGroup ? '👥' : getInitial(activeChat.name)}
+                <div className="relative">
+                  <div className="w-10 h-10 rounded-full bg-violet-600/20 border border-violet-500/40 flex items-center justify-center font-bold text-violet-300">
+                    {activeChat.isGroup ? '👥' : getInitial(activeChat.name)}
+                  </div>
+                  {!activeChat.isGroup && (
+                    <span
+                      className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-[#121829] ${
+                        isOnline ? 'bg-emerald-500' : 'bg-slate-500'
+                      }`}
+                    />
+                  )}
                 </div>
 
                 <div>
@@ -309,9 +395,13 @@ export default function ChatPage() {
                     {activeChat.name || 'Chat'}
                   </h2>
                   <span className="text-[11px] text-slate-400">
-                    {activeChat.isGroup
-                      ? `${activeChat.participants?.length || ''} members`
-                      : 'One-to-One Conversation'}
+                    {isTyping ? (
+                      <span className="text-violet-400 font-medium animate-pulse">typing...</span>
+                    ) : activeChat.isGroup ? (
+                      `${activeChat.participants?.length || ''} members`
+                    ) : (
+                      isOnline ? 'Online' : 'Offline'
+                    )}
                   </span>
                 </div>
               </div>
@@ -333,7 +423,7 @@ export default function ChatPage() {
                   type="text"
                   placeholder="Type a message..."
                   value={text}
-                  onChange={(e) => setText(e.target.value)}
+                  onChange={handleTypingInput}
                   className="flex-1 bg-[#1E2436] border border-[#2A324B] rounded-2xl px-4 py-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-violet-500 transition-all"
                 />
                 <button
