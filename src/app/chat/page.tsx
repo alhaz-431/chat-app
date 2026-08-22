@@ -16,6 +16,11 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<any[]>([]);
   const [text, setText] = useState('');
   
+  // Advanced Features State
+  const [replyingTo, setReplyingTo] = useState<any>(null);
+  const [hasMoreMessages, setHasMoreMessages] = useState(false);
+  const [page, setPage] = useState(1);
+  
   // Real-time Status States
   const [isTyping, setIsTyping] = useState(false);
   const [isOnline, setIsOnline] = useState(false);
@@ -35,16 +40,21 @@ export default function ChatPage() {
   const router = useRouter();
   const socket = useSocket(token) as any;
 
-  // Active chat ref রাখছি যাতে Socket listener-এর ভেতরে লেটেস্ট `activeChat` পাওয়া যায়
   const activeChatRef = useRef(activeChat);
   useEffect(() => {
     activeChatRef.current = activeChat;
   }, [activeChat]);
 
-  // 1. Auth & Initial Load
+  // 1. Auth & Initial Load with Token Expiry Check
   useEffect(() => {
     const savedToken = localStorage.getItem('token');
     
+    // JWT Expiry basic verification or check
+    if (!savedToken) {
+      router.push('/login');
+      return;
+    }
+
     const userStr = localStorage.getItem('user') || localStorage.getItem('userInfo');
     if (userStr) {
       try {
@@ -55,22 +65,13 @@ export default function ChatPage() {
       }
     }
 
-    if (!savedToken) {
-      router.push('/login');
-    } else {
-      setToken(savedToken);
-      fetchConversations();
-    }
+    setToken(savedToken);
+    fetchConversations();
   }, [router]);
 
-  // 2. Real-time Socket Event Handlers & Read Receipts
+  // 2. Real-time Socket Event Handlers
   useEffect(() => {
     if (!socket) return;
-
-    // কনভার্সেশন রুমগুলোতে জয়েন করা (যদি ব্যাকএন্ডে রুম ভিত্তিক সকেট ইভেন্ট থাকে)
-    conversations.forEach((c) => {
-      socket.emit('join:room', c.id || c._id);
-    });
 
     const handleNewMessage = (newMessage: any) => {
       const currentActive = activeChatRef.current;
@@ -78,7 +79,6 @@ export default function ChatPage() {
       
       if (currentActive && newMessage.conversationId === activeId) {
         setMessages((prev) => {
-          // ডুপ্লিকেট মেসেজ চেক
           const exists = prev.some((msg) => (msg.id || msg._id) === (newMessage.id || newMessage._id));
           if (exists) return prev;
           return [...prev, newMessage];
@@ -139,7 +139,7 @@ export default function ChatPage() {
       socket.off('typing:display', handleTypingDisplay);
       socket.off('user:status', handleUserStatus);
     };
-  }, [socket, conversations, currentUserId]);
+  }, [socket, currentUserId]);
 
   const playNotificationSound = () => {
     try {
@@ -159,8 +159,13 @@ export default function ChatPage() {
         ? res.data
         : res.data?.conversations || res.data?.data || [];
       setConversations(data);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Fetch Conversations Error:', err);
+      // Token Expiry / Unauthorized Handling
+      if (err.response?.status === 401) {
+        localStorage.clear();
+        router.push('/login');
+      }
       setConversations([]);
     } finally {
       setIsLoading(false);
@@ -191,7 +196,7 @@ export default function ChatPage() {
       const res = await api.post('/conversations', { userId });
       const chatData = res.data;
       setActiveChat(chatData);
-      fetchMessages(chatData.id || chatData._id);
+      fetchMessages(chatData.id || chatData._id, 1);
       setSearchResults([]);
       setSearchQuery('');
       fetchConversations();
@@ -200,16 +205,23 @@ export default function ChatPage() {
     }
   };
 
-  const fetchMessages = async (id: string) => {
+  const fetchMessages = async (id: string, pageNum = 1) => {
     if (!id) return;
     try {
-      const res = await api.get(`/conversations/${id}/messages?limit=50`);
+      const res = await api.get(`/conversations/${id}/messages?page=${pageNum}&limit=30`);
       const data = Array.isArray(res.data)
         ? res.data
         : res.data?.messages || res.data?.data || [];
-      setMessages(data);
+      
+      setHasMoreMessages(data.length >= 30);
+      
+      if (pageNum === 1) {
+        setMessages(data);
+      } else {
+        setMessages((prev) => [...data, ...prev]);
+      }
 
-      if (socket && data.length > 0) {
+      if (socket && data.length > 0 && pageNum === 1) {
         const lastMsg = data[data.length - 1];
         socket.emit('message:read', {
           conversationId: id,
@@ -218,8 +230,15 @@ export default function ChatPage() {
       }
     } catch (err) {
       console.error('Fetch Messages Error:', err);
-      setMessages([]);
+      if (pageNum === 1) setMessages([]);
     }
+  };
+
+  const handleLoadMore = () => {
+    if (!hasMoreMessages || !activeChat) return;
+    const nextPage = page + 1;
+    setPage(nextPage);
+    fetchMessages(activeChat.id || activeChat._id, nextPage);
   };
 
   const handleTypingInput = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -263,6 +282,7 @@ export default function ChatPage() {
       formData.append('conversationId', activeId);
       if (text.trim()) formData.append('text', text);
       if (selectedFile) formData.append('media', selectedFile);
+      if (replyingTo) formData.append('replyTo', replyingTo.id || replyingTo._id);
 
       const res = await api.post('/messages', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
@@ -277,12 +297,47 @@ export default function ChatPage() {
 
       setText('');
       setSelectedFile(null);
+      setReplyingTo(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
       fetchConversations();
     } catch (err) {
       console.error('Send Message Error:', err);
     } finally {
       setIsUploading(false);
+    }
+  };
+
+  // Advanced Actions Handlers
+  const handleEditMessage = async (messageId: string, newText: string) => {
+    try {
+      await api.put(`/messages/${messageId}`, { text: newText });
+      setMessages((prev) =>
+        prev.map((msg) => (msg.id === messageId || msg._id === messageId ? { ...msg, text: newText } : msg))
+      );
+    } catch (err) {
+      console.error('Edit Message Error:', err);
+    }
+  };
+
+  const handleDeleteMessage = async (messageId: string, deleteForEveryone: boolean) => {
+    try {
+      await api.delete(`/messages/${messageId}`, { data: { deleteForEveryone } });
+      setMessages((prev) => prev.filter((msg) => (msg.id || msg._id) !== messageId));
+    } catch (err) {
+      console.error('Delete Message Error:', err);
+    }
+  };
+
+  const handleReactMessage = async (messageId: string, emoji: string) => {
+    try {
+      const res = await api.post(`/messages/${messageId}/reactions`, { emoji });
+      setMessages((prev) =>
+        prev.map((msg) =>
+          (msg.id === messageId || msg._id === messageId) ? { ...msg, reactions: res.data.reactions } : msg
+        )
+      );
+    } catch (err) {
+      console.error('React Message Error:', err);
     }
   };
 
@@ -373,7 +428,8 @@ export default function ChatPage() {
                   onClick={() => {
                     setActiveChat(c);
                     setIsTyping(false);
-                    fetchMessages(c.id || c._id);
+                    setPage(1);
+                    fetchMessages(c.id || c._id, 1);
                   }}
                   className={`p-3 rounded-2xl cursor-pointer transition-all flex items-center gap-3 ${
                     isActive
@@ -396,9 +452,9 @@ export default function ChatPage() {
                   <div className="flex-1 overflow-hidden">
                     <div className="flex justify-between items-center">
                       <p className="font-semibold text-sm truncate">{c.name || 'Conversation'}</p>
-                      {isGroup && (
-                        <span className="text-[10px] bg-indigo-500/20 text-indigo-300 px-1.5 py-0.5 rounded">
-                          Group
+                      {c.unreadCount > 0 && (
+                        <span className="text-[10px] bg-violet-500 text-white font-bold px-1.5 py-0.5 rounded-full">
+                          {c.unreadCount}
                         </span>
                       )}
                     </div>
@@ -467,16 +523,34 @@ export default function ChatPage() {
             </header>
 
             {/* Chat Messages Body */}
-            <div className="flex-1 overflow-hidden p-3 md:p-4 bg-[#0B0E17]">
+            <div className="flex-1 overflow-hidden bg-[#0B0E17]">
               <ChatContainer
                 messages={messages}
                 currentUserId={currentUserId}
                 isGroup={activeChat.isGroup || (activeChat.participants && activeChat.participants.length > 2)}
+                onEditMessage={handleEditMessage}
+                onDeleteMessage={handleDeleteMessage}
+                onReactMessage={handleReactMessage}
+                onReplyMessage={(msg) => setReplyingTo(msg)}
+                onLoadMore={handleLoadMore}
+                hasMore={hasMoreMessages}
               />
             </div>
 
-            {/* Message Input Bar with File Upload Attachment */}
+            {/* Message Input Bar with Attachments & Reply Banner */}
             <footer className="p-3 md:p-4 border-t border-[#1E2436] bg-[#121829] flex flex-col gap-2">
+              {/* Replying Banner */}
+              {replyingTo && (
+                <div className="flex items-center justify-between bg-[#1E2436] px-3 py-1.5 rounded-xl border border-[#2A324B] text-xs">
+                  <span className="text-violet-300 truncate max-w-[250px]">
+                    ↩️ Replying to: {replyingTo.text || 'Media attachment'}
+                  </span>
+                  <button onClick={() => setReplyingTo(null)} className="text-slate-400 hover:text-red-400 font-bold">
+                    ✕
+                  </button>
+                </div>
+              )}
+
               {/* Selected File Preview Banner */}
               {selectedFile && (
                 <div className="flex items-center justify-between bg-[#1E2436] px-3 py-1.5 rounded-xl border border-[#2A324B] text-xs">
