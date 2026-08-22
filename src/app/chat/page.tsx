@@ -29,6 +29,9 @@ export default function ChatPage() {
   const [selectedGroupUsers, setSelectedGroupUsers] = useState<any[]>([]);
   const [creatingGroup, setCreatingGroup] = useState(false);
 
+  // Unread indicator
+  const [unreadIds, setUnreadIds] = useState<Set<string>>(new Set());
+
   const router = useRouter();
   const socketRef = useRef<Socket | null>(null);
   const activeChatRef = useRef(activeChat);
@@ -91,15 +94,39 @@ export default function ChatPage() {
     socketInstance.on('message:new', (newMessage: any) => {
       const currentActive = activeChatRef.current;
       const activeId = getId(currentActive);
-      const msgConvId = newMessage.conversationId || newMessage.chatId;
 
-      if (currentActive && msgConvId === activeId) {
+      // Try every plausible field name/shape for the conversation id,
+      // since the API doesn't document the exact payload.
+      const msgConvId = String(
+        newMessage.conversationId ||
+        newMessage.chatId ||
+        newMessage.conversation?._id ||
+        newMessage.conversation?.id ||
+        newMessage.conversation ||
+        newMessage.roomId ||
+        ''
+      );
+
+      const isForActiveChat = currentActive && activeId && msgConvId === String(activeId);
+
+      if (isForActiveChat) {
         setMessages((prev) => {
           const exists = prev.some((msg) => getId(msg) === getId(newMessage));
           if (exists) return prev;
           return sortMessages([...prev, newMessage]);
         });
+      } else if (msgConvId) {
+        // Message for a conversation that's not open — mark it unread.
+        setUnreadIds((prev) => new Set(prev).add(msgConvId));
       }
+
+      // Safety net: if we couldn't confidently match the payload shape
+      // but a chat is open, re-sync it directly from the server so the
+      // open thread never silently misses a message.
+      if (currentActive && activeId && !isForActiveChat && !msgConvId) {
+        fetchMessages(activeId);
+      }
+
       fetchConversations();
     });
 
@@ -390,19 +417,28 @@ export default function ChatPage() {
               const isActive = getId(activeChat) === getId(c);
               const chatName = getConversationName(c);
               const lastText = c.lastMessage?.text || c.lastMessage?.content || '';
+              const hasUnread = unreadIds.has(String(getId(c)));
               return (
                 <div
                   key={getId(c) || idx}
                   onClick={() => {
                     setActiveChat(c);
                     fetchMessages(getId(c));
+                    setUnreadIds((prev) => {
+                      const next = new Set(prev);
+                      next.delete(String(getId(c)));
+                      return next;
+                    });
                   }}
                   className={`p-3 rounded-xl cursor-pointer transition-all flex items-center gap-3 ${
                     isActive ? 'bg-violet-600/20 border border-violet-500/40 text-white' : 'hover:bg-[#1E2436] text-slate-300'
                   }`}
                 >
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-violet-600/20 text-violet-300 text-sm font-semibold">
+                  <div className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-violet-600/20 text-violet-300 text-sm font-semibold">
                     {getConversationInitial(c)}
+                    {hasUnread && (
+                      <span className="absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full bg-green-500 border-2 border-[#121829]" />
+                    )}
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5">
