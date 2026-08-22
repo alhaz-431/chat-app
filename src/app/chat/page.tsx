@@ -299,15 +299,25 @@ export default function ChatPage() {
 
     try {
       setIsUploading(true);
-      const formData = new FormData();
-      formData.append('conversationId', activeId);
-      if (text.trim()) formData.append('text', text);
-      if (selectedFile) formData.append('media', selectedFile);
-      if (replyingTo) formData.append('replyTo', replyingTo.id || replyingTo._id);
+      let res;
 
-      const res = await api.post('/messages', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
+      if (selectedFile) {
+        const formData = new FormData();
+        formData.append('conversationId', activeId);
+        if (text.trim()) formData.append('text', text);
+        formData.append('media', selectedFile);
+        if (replyingTo) formData.append('replyTo', replyingTo.id || replyingTo._id);
+
+        res = await api.post('/messages', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+      } else {
+        res = await api.post('/messages', {
+          conversationId: activeId,
+          text: text.trim(),
+          replyTo: replyingTo ? (replyingTo.id || replyingTo._id) : undefined,
+        });
+      }
 
       const newMsg = res.data;
       setMessages((prev) => {
@@ -321,8 +331,8 @@ export default function ChatPage() {
       setReplyingTo(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
       fetchConversations();
-    } catch (err) {
-      console.error('Send Message Error:', err);
+    } catch (err: any) {
+      console.error('Send Message Error:', err.response?.data || err);
     } finally {
       setIsUploading(false);
     }
