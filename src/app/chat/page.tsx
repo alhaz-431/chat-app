@@ -284,28 +284,30 @@ export default function ChatPage() {
     }
   };
 
+  // Fixed sendMessage function
   const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if ((!text.trim() && !selectedFile) || !activeChat) return;
 
-    const activeId = activeChat.id || activeChat._id;
-
-    if (socket) {
-      socket.emit('typing', {
-        conversationId: activeId,
-        isTyping: false,
-      });
-    }
-
+    setIsUploading(true);
     try {
-      setIsUploading(true);
+      const activeId = activeChat.id || activeChat._id;
       let res;
 
       if (selectedFile) {
         const formData = new FormData();
         formData.append('conversationId', activeId);
-        if (text.trim()) formData.append('text', text);
+        formData.append('chatId', activeId); 
+        
+        if (text.trim()) {
+          formData.append('text', text);
+          formData.append('content', text);
+        }
+        
         formData.append('media', selectedFile);
+        formData.append('file', selectedFile);
+        formData.append('image', selectedFile);
+
         if (replyingTo) formData.append('replyTo', replyingTo.id || replyingTo._id);
 
         res = await api.post('/messages', formData, {
@@ -314,7 +316,9 @@ export default function ChatPage() {
       } else {
         res = await api.post('/messages', {
           conversationId: activeId,
-          text: text.trim(),
+          chatId: activeId,
+          text: text,
+          content: text,
           replyTo: replyingTo ? (replyingTo.id || replyingTo._id) : undefined,
         });
       }
