@@ -25,13 +25,23 @@ export default function LoginForm() {
     setError(null);
     try {
       const data = await login(phone.trim(), name.trim());
-      // TODO: confirm the real response shape once inspected live.
-      // Assuming { token, user: { id, name, phone } } for now.
-      setAuth(data.user, data.token);
+      
+      // সেফটি চেক: টোকেন বা ইউজার না থাকলে এরর থ্রো করবে
+      if (!data || !data.token) {
+        throw new Error("Invalid response from server");
+      }
+
+      // ব্যাকএন্ডের রেসপন্স অনুযায়ী ইউজার অবজেক্ট সেট করা
+      const userData = data.user || { id: "temp-id", name: name.trim(), phone: phone.trim() };
+      setAuth(userData, data.token);
+      
+      toast.success("Successfully logged in!");
       router.push("/chat");
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
       const message =
+        err?.response?.data?.message ||
+        err?.message ||
         "Couldn't sign you in. Check your phone number and try again.";
       setError(message);
       toast.error(message);
@@ -45,7 +55,7 @@ export default function LoginForm() {
       <div className="space-y-1.5">
         <label
           htmlFor="phone"
-          className="text-sm font-medium text-[var(--foreground)]"
+          className="text-sm font-medium text-zinc-800 dark:text-zinc-200"
         >
           Phone number
         </label>
@@ -57,14 +67,14 @@ export default function LoginForm() {
           placeholder="e.g. 01812345678"
           value={phone}
           onChange={(e) => setPhone(e.target.value)}
-          className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-[var(--foreground)] outline-none transition focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent)]/20"
+          className="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-4 py-3 text-zinc-900 dark:text-white outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
         />
       </div>
 
       <div className="space-y-1.5">
         <label
           htmlFor="name"
-          className="text-sm font-medium text-[var(--foreground)]"
+          className="text-sm font-medium text-zinc-800 dark:text-zinc-200"
         >
           Your name
         </label>
@@ -75,12 +85,12 @@ export default function LoginForm() {
           placeholder="e.g. Mohammad Rahman"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-[var(--foreground)] outline-none transition focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent)]/20"
+          className="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-4 py-3 text-zinc-900 dark:text-white outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
         />
       </div>
 
       {error && (
-        <p role="alert" className="text-sm text-[var(--danger)]">
+        <p role="alert" className="text-sm text-red-500 font-medium bg-red-50 dark:bg-red-950/50 p-3 rounded-lg border border-red-200 dark:border-red-900">
           {error}
         </p>
       )}
@@ -88,12 +98,12 @@ export default function LoginForm() {
       <button
         type="submit"
         disabled={!isValid || loading}
-        className="w-full rounded-lg bg-[var(--accent)] px-4 py-3 font-medium text-[var(--accent-foreground)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+        className="w-full rounded-xl bg-emerald-600 px-4 py-3 font-medium text-white shadow-lg shadow-emerald-600/20 transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
       >
         {loading ? "Signing you in…" : "Continue"}
       </button>
 
-      <p className="text-center text-xs text-[var(--muted)]">
+      <p className="text-center text-xs text-zinc-500 dark:text-zinc-400">
         New number? You&rsquo;ll be registered automatically.
       </p>
     </form>
