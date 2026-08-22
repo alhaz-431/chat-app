@@ -138,8 +138,8 @@ export default function ChatPage() {
 
     const handleUserStatus = (data: { userId: string; isOnline: boolean }) => {
       const currentActive = activeChatRef.current;
-      if (currentActive && !currentActive.isGroup) {
-        const otherParticipant = currentActive.participants?.find(
+      if (currentActive && !activeChat.isGroup) {
+        const otherParticipant = activeChat.participants?.find(
           (p: any) => (p._id || p.id || p) !== currentUserId
         );
         const otherId = otherParticipant?._id || otherParticipant?.id || otherParticipant;
@@ -262,7 +262,8 @@ export default function ChatPage() {
   };
 
   const handleTypingInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setText(e.target.value);
+    const val = e.target.value;
+    setText(val);
 
     if (socket && activeChat) {
       const activeId = activeChat.id || activeChat._id;
@@ -362,6 +363,20 @@ export default function ChatPage() {
 
   const getInitial = (name: string) => (name ? name.charAt(0).toUpperCase() : 'C');
 
+  // Helper to extract correct display name (handles backend response formats where `name` might be missing on 1-to-1 chats)
+  const getConversationName = (c: any) => {
+    if (c.name) return c.name;
+    if (c.participants && Array.isArray(c.participants)) {
+      const otherParticipant = c.participants.find(
+        (p: any) => (typeof p === 'object' ? (p._id || p.id) : p) !== currentUserId
+      );
+      if (otherParticipant && typeof otherParticipant === 'object') {
+        return otherParticipant.name || otherParticipant.email || 'Direct Chat';
+      }
+    }
+    return 'Chat';
+  };
+
   return (
     <div className="flex h-screen bg-[#0B0E17] text-slate-100 font-sans overflow-hidden">
       {/* Sidebar */}
@@ -440,6 +455,7 @@ export default function ChatPage() {
             conversations.map((c, idx) => {
               const isActive = activeChat?.id === c.id || activeChat?._id === c._id;
               const isGroup = c.isGroup || (c.participants && c.participants.length > 2);
+              const displayName = getConversationName(c);
 
               return (
                 <div
@@ -464,13 +480,13 @@ export default function ChatPage() {
                           : 'bg-[#1E2436] text-violet-400 border border-[#2A324B]'
                       }`}
                     >
-                      {isGroup ? '👥' : getInitial(c.name)}
+                      {isGroup ? '👥' : getInitial(displayName)}
                     </div>
                   </div>
 
                   <div className="flex-1 overflow-hidden">
                     <div className="flex justify-between items-center">
-                      <p className="font-semibold text-sm truncate">{c.name || 'Conversation'}</p>
+                      <p className="font-semibold text-sm truncate">{displayName}</p>
                       {c.unreadCount > 0 && (
                         <span className="text-[10px] bg-violet-500 text-white font-bold px-1.5 py-0.5 rounded-full">
                           {c.unreadCount}
@@ -512,7 +528,7 @@ export default function ChatPage() {
 
                 <div className="relative">
                   <div className="w-10 h-10 rounded-full bg-violet-600/20 border border-violet-500/40 flex items-center justify-center font-bold text-violet-300">
-                    {activeChat.isGroup ? '👥' : getInitial(activeChat.name)}
+                    {activeChat.isGroup ? '👥' : getInitial(getConversationName(activeChat))}
                   </div>
                   {!activeChat.isGroup && (
                     <span
@@ -525,7 +541,7 @@ export default function ChatPage() {
 
                 <div>
                   <h2 className="font-bold text-white text-sm leading-tight truncate max-w-[180px] sm:max-w-xs">
-                    {activeChat.name || 'Chat'}
+                    {getConversationName(activeChat)}
                   </h2>
                   <span className="text-[11px] text-slate-400">
                     {isTyping ? (
@@ -616,7 +632,7 @@ export default function ChatPage() {
                 <button
                   type="submit"
                   disabled={(!text.trim() && !selectedFile) || isUploading}
-                  className="bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white p-3 rounded-2xl transition-all shadow-lg shadow-violet-600/30 flex items-center justify-center shrink-0 active:scale-95"
+                  className="bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white p-3 rounded-2xl transition-all shadow-lg shadow-violet-600/30 flex items-center justify-center shrink-0 active:scale-95 cursor-pointer disabled:cursor-not-allowed"
                 >
                   {isUploading ? (
                     <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
