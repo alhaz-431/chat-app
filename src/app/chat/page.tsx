@@ -363,7 +363,6 @@ export default function ChatPage() {
 
   const getInitial = (name: string) => (name ? name.charAt(0).toUpperCase() : 'C');
 
-  // Helper to extract correct display name (handles backend response formats where `name` might be missing on 1-to-1 chats)
   const getConversationName = (c: any) => {
     if (c.name) return c.name;
     if (c.participants && Array.isArray(c.participants)) {
@@ -576,7 +575,7 @@ export default function ChatPage() {
                   <span className="text-violet-300 truncate max-w-[250px]">
                     ↩️ Replying to: {replyingTo.text || 'Media attachment'}
                   </span>
-                  <button onClick={() => setReplyingTo(null)} className="text-slate-400 hover:text-red-400 font-bold">
+                  <button type="button" onClick={() => setReplyingTo(null)} className="text-slate-400 hover:text-red-400 font-bold">
                     ✕
                   </button>
                 </div>
@@ -586,6 +585,7 @@ export default function ChatPage() {
                 <div className="flex items-center justify-between bg-[#1E2436] px-3 py-1.5 rounded-xl border border-[#2A324B] text-xs">
                   <span className="text-violet-300 truncate max-w-[200px]">📎 {selectedFile.name}</span>
                   <button
+                    type="button"
                     onClick={() => {
                       setSelectedFile(null);
                       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -631,7 +631,7 @@ export default function ChatPage() {
 
                 <button
                   type="submit"
-                  disabled={(!text.trim() && !selectedFile) || isUploading}
+                  disabled={isUploading || (text.trim() === '' && !selectedFile)}
                   className="bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white p-3 rounded-2xl transition-all shadow-lg shadow-violet-600/30 flex items-center justify-center shrink-0 active:scale-95 cursor-pointer disabled:cursor-not-allowed"
                 >
                   {isUploading ? (
