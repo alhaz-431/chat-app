@@ -5,7 +5,7 @@ import { useAuthStore } from "./store";
 // The WebSocket connects to the ROOT origin instead (see socket.ts).
 export const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ??
-  "https://frontend-task-chatapp.onrender.com/";
+  "https://frontend-task-chatapp.onrender.com/api";
 
 export const API_ROOT_URL =
   process.env.NEXT_PUBLIC_API_ROOT_URL ??

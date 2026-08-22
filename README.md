@@ -14,7 +14,7 @@ npm install
 cp .env.local.example .env.local   # adjust if the API URL changes
 npm run dev
 Visit the live application or run locally at http://localhost:3000 — it redirects to /login if signed out, /chat if signed in.
-Landing page: [আপনার-লাইভ-লিংক-এখানে-দিন]/landing (অথবা মূল ডোমেইন)।
+Landing page: https://chat-app-git-main-alhazs-projects-b0a8396a.vercel.app/।
 
 Live demo links
 Part 1 (Chat App): [এখানে আপনার চ্যাট অ্যাপের Vercel লিংক দিন]
