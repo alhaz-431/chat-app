@@ -28,7 +28,6 @@ export default function ChatPage() {
   useEffect(() => {
     const savedToken = localStorage.getItem('token');
     
-    // Check various common keys where user data might be stored
     const userStr = localStorage.getItem('user') || localStorage.getItem('userInfo');
     if (userStr) {
       try {
@@ -47,13 +46,15 @@ export default function ChatPage() {
     }
   }, [router]);
 
-  const socket = useSocket(token);
+  const socket = useSocket(token) as any;
 
   // 2. Real-time Socket Event Handlers
   useEffect(() => {
     if (!socket) return;
 
-    socket.on('message:new', (newMessage: any) => {
+    const currentSocket = socket as any;
+
+    currentSocket.on('message:new', (newMessage: any) => {
       const activeId = activeChat?.id || activeChat?._id;
       if (activeChat && newMessage.conversationId === activeId) {
         setMessages((prev) => [...prev, newMessage]);
@@ -62,7 +63,9 @@ export default function ChatPage() {
     });
 
     return () => {
-      socket.off('message:new');
+      if (currentSocket && typeof currentSocket.off === 'function') {
+        currentSocket.off('message:new');
+      }
     };
   }, [socket, activeChat]);
 
