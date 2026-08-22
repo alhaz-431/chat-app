@@ -7,6 +7,7 @@ import { api } from '@/lib/api';
 import { useSocket } from '@/hooks/useSocket';
 import { ChatContainer } from '@/components/ChatContainer';
 import { GroupModal } from '@/components/GroupModal';
+import { useAuthStore } from '@/lib/store';
 
 export default function ChatPage() {
   const [token, setToken] = useState<string | null>(null);
@@ -45,17 +46,34 @@ export default function ChatPage() {
     activeChatRef.current = activeChat;
   }, [activeChat]);
 
-  // 1. Auth & Initial Load with Token Expiry Check
+  // 1. Auth & Initial Load with Robust Token Verification
   useEffect(() => {
-    const savedToken = localStorage.getItem('token');
-    
-    // JWT Expiry basic verification or check
-    if (!savedToken) {
-      router.push('/login');
-      return;
-    }
+    const checkAuth = () => {
+      const savedToken = localStorage.getItem('token') || useAuthStore.getState().token;
+      
+      if (!savedToken) {
+        // টোকেন না থাকলে সরাসরি রিডাইরেক্ট না করে সামান্য সময় দিয়ে রি-চেক করা যেতে পারে, অথবা সরাসরি লগইন
+        setTimeout(() => {
+          const recheckToken = localStorage.getItem('token') || useAuthStore.getState().token;
+          if (!recheckToken) {
+            router.push('/login');
+          } else {
+            initializeUser(recheckToken);
+          }
+        }, 300);
+        return;
+      }
 
+      initializeUser(savedToken);
+    };
+
+    checkAuth();
+  }, [router]);
+
+  const initializeUser = (savedToken: string) => {
     const userStr = localStorage.getItem('user') || localStorage.getItem('userInfo');
+    const storeUser = useAuthStore.getState().user;
+
     if (userStr) {
       try {
         const parsed = JSON.parse(userStr);
@@ -63,11 +81,13 @@ export default function ChatPage() {
       } catch (e) {
         console.error('Error parsing user data:', e);
       }
+    } else if (storeUser) {
+      setCurrentUserId(storeUser.id || storeUser._id || '');
     }
 
     setToken(savedToken);
     fetchConversations();
-  }, [router]);
+  };
 
   // 2. Real-time Socket Event Handlers
   useEffect(() => {
@@ -161,7 +181,6 @@ export default function ChatPage() {
       setConversations(data);
     } catch (err: any) {
       console.error('Fetch Conversations Error:', err);
-      // Token Expiry / Unauthorized Handling
       if (err.response?.status === 401) {
         localStorage.clear();
         router.push('/login');
@@ -307,7 +326,6 @@ export default function ChatPage() {
     }
   };
 
-  // Advanced Actions Handlers
   const handleEditMessage = async (messageId: string, newText: string) => {
     try {
       await api.put(`/messages/${messageId}`, { text: newText });
@@ -477,7 +495,6 @@ export default function ChatPage() {
       >
         {activeChat ? (
           <>
-            {/* Active Chat Header */}
             <header className="p-3.5 md:p-4 border-b border-[#1E2436] bg-[#121829] flex items-center justify-between z-10">
               <div className="flex items-center gap-3">
                 <button
@@ -522,7 +539,6 @@ export default function ChatPage() {
               </div>
             </header>
 
-            {/* Chat Messages Body */}
             <div className="flex-1 overflow-hidden bg-[#0B0E17]">
               <ChatContainer
                 messages={messages}
@@ -537,9 +553,7 @@ export default function ChatPage() {
               />
             </div>
 
-            {/* Message Input Bar with Attachments & Reply Banner */}
             <footer className="p-3 md:p-4 border-t border-[#1E2436] bg-[#121829] flex flex-col gap-2">
-              {/* Replying Banner */}
               {replyingTo && (
                 <div className="flex items-center justify-between bg-[#1E2436] px-3 py-1.5 rounded-xl border border-[#2A324B] text-xs">
                   <span className="text-violet-300 truncate max-w-[250px]">
@@ -551,7 +565,6 @@ export default function ChatPage() {
                 </div>
               )}
 
-              {/* Selected File Preview Banner */}
               {selectedFile && (
                 <div className="flex items-center justify-between bg-[#1E2436] px-3 py-1.5 rounded-xl border border-[#2A324B] text-xs">
                   <span className="text-violet-300 truncate max-w-[200px]">📎 {selectedFile.name}</span>
