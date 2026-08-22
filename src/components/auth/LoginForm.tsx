@@ -26,17 +26,20 @@ export default function LoginForm() {
     try {
       const data = await login(phone.trim(), name.trim());
       
-      // সেফটি চেক: টোকেন বা ইউজার না থাকলে এরর থ্রো করবে
       if (!data || !data.token) {
         throw new Error("Invalid response from server");
       }
 
-      // ব্যাকএন্ডের রেসপন্স অনুযায়ী ইউজার অবজেক্ট সেট করা
       const userData = data.user || { id: "temp-id", name: name.trim(), phone: phone.trim() };
       setAuth(userData, data.token);
       
       toast.success("Successfully logged in!");
-      router.push("/chat");
+      
+      // ডিরেক্ট পেজ রিডাইরেক্ট করার জন্য window.location ব্যবহার করা হলো যাতে ফেইল না করে
+      setTimeout(() => {
+        window.location.href = "/chat";
+      }, 500);
+
     } catch (err: any) {
       console.error(err);
       const message =
