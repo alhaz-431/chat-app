@@ -21,6 +21,14 @@ export default function ChatPage() {
   const [userCache, setUserCache] = useState<{ [key: string]: { name: string; phone: string } }>({});
   const [isLoading, setIsLoading] = useState(true);
 
+  // Group creation states
+  const [showGroupModal, setShowGroupModal] = useState(false);
+  const [groupName, setGroupName] = useState('');
+  const [groupSearchQuery, setGroupSearchQuery] = useState('');
+  const [groupSearchResults, setGroupSearchResults] = useState<any[]>([]);
+  const [selectedGroupUsers, setSelectedGroupUsers] = useState<any[]>([]);
+  const [creatingGroup, setCreatingGroup] = useState(false);
+
   const router = useRouter();
   const socketRef = useRef<Socket | null>(null);
   const activeChatRef = useRef(activeChat);
@@ -120,7 +128,6 @@ export default function ChatPage() {
         ? res.data
         : res.data?.data || res.data?.users || [];
 
-      // Cache searched users so we can display their names instantly in the sidebar
       const newCache = { ...userCache };
       data.forEach((u: any) => {
         const uId = getId(u);
@@ -140,7 +147,6 @@ export default function ChatPage() {
     const targetUserId = getId(userObj);
     if (!targetUserId) return;
 
-    // Cache user info immediately
     setUserCache((prev) => ({
       ...prev,
       [targetUserId]: { name: userObj.name, phone: userObj.phone }
@@ -158,6 +164,71 @@ export default function ChatPage() {
       setSearchQuery('');
     } catch (err) {
       console.error('Start Direct Chat Error:', err);
+    }
+  };
+
+  // ---- Group creation ----
+  const handleGroupSearch = async (query: string) => {
+    setGroupSearchQuery(query);
+    if (!query.trim()) {
+      setGroupSearchResults([]);
+      return;
+    }
+    try {
+      const res = await api.get(`/users/search?q=${query}`);
+      const data = Array.isArray(res.data)
+        ? res.data
+        : res.data?.data || res.data?.users || [];
+
+      const newCache = { ...userCache };
+      data.forEach((u: any) => {
+        const uId = getId(u);
+        if (uId) newCache[uId] = { name: u.name, phone: u.phone };
+      });
+      setUserCache(newCache);
+      setGroupSearchResults(data);
+    } catch (err) {
+      console.error('Group User Search Error:', err);
+      setGroupSearchResults([]);
+    }
+  };
+
+  const toggleGroupUser = (user: any) => {
+    setSelectedGroupUsers((prev) => {
+      const exists = prev.some((u) => getId(u) === getId(user));
+      return exists
+        ? prev.filter((u) => getId(u) !== getId(user))
+        : [...prev, user];
+    });
+  };
+
+  const closeGroupModal = () => {
+    setShowGroupModal(false);
+    setGroupName('');
+    setGroupSearchQuery('');
+    setGroupSearchResults([]);
+    setSelectedGroupUsers([]);
+  };
+
+  const createGroupChat = async () => {
+    if (!groupName.trim() || selectedGroupUsers.length < 2 || creatingGroup) return;
+    setCreatingGroup(true);
+    try {
+      const participantIds = selectedGroupUsers.map((u) => getId(u));
+      const res = await api.post('/conversations/group', {
+        name: groupName.trim(),
+        participantIds,
+      });
+      const chatData = res.data?.data || res.data;
+
+      await fetchConversations();
+      setActiveChat(chatData);
+      fetchMessages(getId(chatData));
+      closeGroupModal();
+    } catch (err) {
+      console.error('Create Group Error:', err);
+    } finally {
+      setCreatingGroup(false);
     }
   };
 
@@ -213,22 +284,17 @@ export default function ChatPage() {
     fetchConversations();
   };
 
-  // Conversation display name — real API returns a single "participant"
-  // object for direct chats, and (presumably) "name" + "participants"
-  // array for groups.
   const getConversationName = (c: any) => {
     if (!c) return 'Direct Chat';
 
     if (c.name) return c.name; // group chat name
 
-    // Direct chats: API returns a single "participant" object (the OTHER user)
     if (c.participant && c.participant.name) {
       return c.participant.name;
     }
 
     if (c.user && c.user.name) return c.user.name;
 
-    // Fallback shape: a "participants" array (e.g. for groups, or older data)
     if (c.participants && Array.isArray(c.participants)) {
       const otherParticipant = c.participants.find((p: any) => {
         const pId = typeof p === 'string' ? p : getId(p);
@@ -246,13 +312,15 @@ export default function ChatPage() {
       }
     }
 
-    return 'Direct Chat';
+    return c.type === 'group' ? 'Unnamed group' : 'Direct Chat';
   };
 
   const getConversationInitial = (c: any) => {
     const label = getConversationName(c);
     return label.charAt(0).toUpperCase();
   };
+
+  const isGroupChat = (c: any) => c?.type === 'group' || Boolean(c?.name);
 
   return (
     <div className="flex h-screen bg-[#0B0E17] text-slate-100 font-sans overflow-hidden">
@@ -265,6 +333,12 @@ export default function ChatPage() {
             </Link>
             <h1 className="text-lg font-bold text-white">Chats</h1>
           </div>
+          <button
+            onClick={() => setShowGroupModal(true)}
+            className="px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-xs font-semibold"
+          >
+            + Group
+          </button>
         </div>
 
         <div className="p-4 relative">
@@ -317,7 +391,14 @@ export default function ChatPage() {
                     {getConversationInitial(c)}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="font-semibold text-sm truncate">{chatName}</p>
+                    <div className="flex items-center gap-1.5">
+                      <p className="font-semibold text-sm truncate">{chatName}</p>
+                      {isGroupChat(c) && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-600/30 text-violet-300">
+                          Group
+                        </span>
+                      )}
+                    </div>
                     {lastText && (
                       <p className="text-xs text-slate-500 truncate">{lastText}</p>
                     )}
@@ -344,6 +425,11 @@ export default function ChatPage() {
                 {getConversationInitial(activeChat)}
               </div>
               <h2 className="font-bold text-white text-sm">{getConversationName(activeChat)}</h2>
+              {isGroupChat(activeChat) && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-600/30 text-violet-300">
+                  Group
+                </span>
+              )}
             </header>
 
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
@@ -356,9 +442,14 @@ export default function ChatPage() {
                   const senderObj = msg.sender;
                   const senderId = typeof senderObj === 'string' ? senderObj : getId(senderObj);
                   const isMine = senderId === currentUserId;
+                  const senderName =
+                    typeof senderObj === 'object' ? senderObj?.name : userCache[senderId]?.name;
 
                   return (
-                    <div key={getId(msg) || idx} className={`flex ${isMine ? 'justify-end' : 'justify-start'}`}>
+                    <div key={getId(msg) || idx} className={`flex flex-col ${isMine ? 'items-end' : 'items-start'}`}>
+                      {!isMine && isGroupChat(activeChat) && senderName && (
+                        <span className="mb-0.5 px-1 text-[11px] text-slate-500">{senderName}</span>
+                      )}
                       <div className={`max-w-xs md:max-w-md px-4 py-2 rounded-2xl text-sm ${isMine ? 'bg-violet-600 text-white' : 'bg-[#1E2436] text-slate-200'}`}>
                         {msg.text || msg.content}
                       </div>
@@ -391,6 +482,89 @@ export default function ChatPage() {
           </div>
         )}
       </main>
+
+      {/* New Group Modal */}
+      {showGroupModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-[#121829] border border-[#2A324B] flex flex-col max-h-[85vh]">
+            <div className="p-4 border-b border-[#1E2436] flex items-center justify-between">
+              <h3 className="font-bold text-white text-sm">New group</h3>
+              <button onClick={closeGroupModal} className="text-slate-400 hover:text-white text-lg leading-none">
+                ✕
+              </button>
+            </div>
+
+            <div className="p-4 border-b border-[#1E2436] space-y-3">
+              <input
+                type="text"
+                placeholder="Group name"
+                value={groupName}
+                onChange={(e) => setGroupName(e.target.value)}
+                className="w-full bg-[#1E2436] border border-[#2A324B] rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-violet-500"
+              />
+
+              {selectedGroupUsers.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {selectedGroupUsers.map((u) => (
+                    <button
+                      key={getId(u)}
+                      onClick={() => toggleGroupUser(u)}
+                      className="flex items-center gap-1 rounded-full bg-violet-600/20 text-violet-300 px-3 py-1 text-xs"
+                    >
+                      {u.name} ✕
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <input
+                type="text"
+                placeholder="Search users to add..."
+                value={groupSearchQuery}
+                onChange={(e) => handleGroupSearch(e.target.value)}
+                className="w-full bg-[#1E2436] border border-[#2A324B] rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-violet-500"
+              />
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-2">
+              {groupSearchResults.length === 0 && groupSearchQuery.trim() && (
+                <p className="p-3 text-sm text-slate-500">No users found.</p>
+              )}
+              {groupSearchResults.map((u, idx) => {
+                const isSelected = selectedGroupUsers.some((su) => getId(su) === getId(u));
+                return (
+                  <div
+                    key={getId(u) || idx}
+                    onClick={() => toggleGroupUser(u)}
+                    className={`p-3 rounded-xl cursor-pointer flex items-center justify-between ${
+                      isSelected ? 'bg-violet-600/20' : 'hover:bg-[#1E2436]'
+                    }`}
+                  >
+                    <div>
+                      <p className="font-semibold text-sm text-slate-100">{u.name}</p>
+                      <p className="text-xs text-slate-400">{u.phone}</p>
+                    </div>
+                    {isSelected && <span className="text-violet-400 text-sm">✓</span>}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="p-4 border-t border-[#1E2436]">
+              <button
+                onClick={createGroupChat}
+                disabled={!groupName.trim() || selectedGroupUsers.length < 2 || creatingGroup}
+                className="w-full bg-violet-600 hover:bg-violet-500 disabled:opacity-40 disabled:cursor-not-allowed text-white py-2.5 rounded-xl text-sm font-semibold"
+              >
+                {creatingGroup ? 'Creating…' : `Create group${selectedGroupUsers.length > 0 ? ` (${selectedGroupUsers.length + 1} members)` : ''}`}
+              </button>
+              <p className="mt-2 text-[11px] text-slate-500 text-center">
+                Select at least 2 other members to form a group.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
