@@ -17,7 +17,7 @@ Visit the live application or run locally at http://localhost:3000 — it redire
 Landing page: https://chat-app-git-main-alhazs-projects-b0a8396a.vercel.app/।
 
 Live demo links
-Part 1 (Chat App): [এখানে আপনার চ্যাট অ্যাপের Vercel লিংক দিন]
+Part 1 (Chat App): [https://chat-app-pi-roan-24.vercel.app/chat]
 
 Part 2 (Landing Page): https://chat-app-pi-roan-24.vercel.app/
 
