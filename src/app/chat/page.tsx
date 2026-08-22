@@ -21,6 +21,11 @@ export default function ChatPage() {
   const [isOnline, setIsOnline] = useState(false);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Media Upload State
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   // UI & Search States
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
@@ -28,6 +33,13 @@ export default function ChatPage() {
   const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
   
   const router = useRouter();
+  const socket = useSocket(token) as any;
+
+  // Active chat ref রাখছি যাতে Socket listener-এর ভেতরে লেটেস্ট `activeChat` পাওয়া যায়
+  const activeChatRef = useRef(activeChat);
+  useEffect(() => {
+    activeChatRef.current = activeChat;
+  }, [activeChat]);
 
   // 1. Auth & Initial Load
   useEffect(() => {
@@ -51,40 +63,62 @@ export default function ChatPage() {
     }
   }, [router]);
 
-  const socket = useSocket(token) as any;
-
-  // 2. Real-time Socket Event Handlers & Typing/Online Listeners
+  // 2. Real-time Socket Event Handlers & Read Receipts
   useEffect(() => {
     if (!socket) return;
 
-    const currentSocket = socket as any;
+    // কনভার্সেশন রুমগুলোতে জয়েন করা (যদি ব্যাকএন্ডে রুম ভিত্তিক সকেট ইভেন্ট থাকে)
+    conversations.forEach((c) => {
+      socket.emit('join:room', c.id || c._id);
+    });
 
-    currentSocket.on('message:new', (newMessage: any) => {
-      const activeId = activeChat?.id || activeChat?._id;
-      if (activeChat && newMessage.conversationId === activeId) {
-        setMessages((prev) => [...prev, newMessage]);
+    const handleNewMessage = (newMessage: any) => {
+      const currentActive = activeChatRef.current;
+      const activeId = currentActive?.id || currentActive?._id;
+      
+      if (currentActive && newMessage.conversationId === activeId) {
+        setMessages((prev) => {
+          // ডুপ্লিকেট মেসেজ চেক
+          const exists = prev.some((msg) => (msg.id || msg._id) === (newMessage.id || newMessage._id));
+          if (exists) return prev;
+          return [...prev, newMessage];
+        });
         
-        // ছোট সাউন্ড নোটিফিকেশন (যদি মেসেজ অন্য কারও কাছ থেকে আসে)
+        socket.emit('message:read', {
+          conversationId: activeId,
+          messageId: newMessage.id || newMessage._id,
+        });
+
         const senderId = newMessage.sender?._id || newMessage.sender?.id || newMessage.sender;
         if (senderId !== currentUserId) {
           playNotificationSound();
         }
       }
       fetchConversations();
-    });
+    };
 
-    // টাইপিং ইন্ডিকেটর লিসেন করা
-    currentSocket.on('typing:display', (data: { conversationId: string; userId: string; isTyping: boolean }) => {
-      const activeId = activeChat?.id || activeChat?._id;
-      if (activeChat && data.conversationId === activeId && data.userId !== currentUserId) {
+    const handleStatusUpdate = (data: { messageId: string; status: 'delivered' | 'seen' }) => {
+      setMessages((prev) =>
+        prev.map((msg) =>
+          (msg.id === data.messageId || msg._id === data.messageId)
+            ? { ...msg, status: data.status }
+            : msg
+        )
+      );
+    };
+
+    const handleTypingDisplay = (data: { conversationId: string; userId: string; isTyping: boolean }) => {
+      const currentActive = activeChatRef.current;
+      const activeId = currentActive?.id || currentActive?._id;
+      if (currentActive && data.conversationId === activeId && data.userId !== currentUserId) {
         setIsTyping(data.isTyping);
       }
-    });
+    };
 
-    // অনলাইন স্ট্যাটাস লিসেন করা
-    currentSocket.on('user:status', (data: { userId: string; isOnline: boolean }) => {
-      if (activeChat && !activeChat.isGroup) {
-        const otherParticipant = activeChat.participants?.find(
+    const handleUserStatus = (data: { userId: string; isOnline: boolean }) => {
+      const currentActive = activeChatRef.current;
+      if (currentActive && !currentActive.isGroup) {
+        const otherParticipant = currentActive.participants?.find(
           (p: any) => (p._id || p.id || p) !== currentUserId
         );
         const otherId = otherParticipant?._id || otherParticipant?.id || otherParticipant;
@@ -92,18 +126,21 @@ export default function ChatPage() {
           setIsOnline(data.isOnline);
         }
       }
-    });
+    };
+
+    socket.on('message:new', handleNewMessage);
+    socket.on('message:update-status', handleStatusUpdate);
+    socket.on('typing:display', handleTypingDisplay);
+    socket.on('user:status', handleUserStatus);
 
     return () => {
-      if (currentSocket && typeof currentSocket.off === 'function') {
-        currentSocket.off('message:new');
-        currentSocket.off('typing:display');
-        currentSocket.off('user:status');
-      }
+      socket.off('message:new', handleNewMessage);
+      socket.off('message:update-status', handleStatusUpdate);
+      socket.off('typing:display', handleTypingDisplay);
+      socket.off('user:status', handleUserStatus);
     };
-  }, [socket, activeChat, currentUserId]);
+  }, [socket, conversations, currentUserId]);
 
-  // নোটিফিকেশন সাউন্ড বাজানোর ফাংশন
   const playNotificationSound = () => {
     try {
       const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
@@ -114,7 +151,6 @@ export default function ChatPage() {
     }
   };
 
-  // 3. API Calls
   const fetchConversations = async () => {
     setIsLoading(true);
     try {
@@ -153,8 +189,9 @@ export default function ChatPage() {
     if (!userId) return;
     try {
       const res = await api.post('/conversations', { userId });
-      setActiveChat(res.data);
-      fetchMessages(res.data.id || res.data._id);
+      const chatData = res.data;
+      setActiveChat(chatData);
+      fetchMessages(chatData.id || chatData._id);
       setSearchResults([]);
       setSearchQuery('');
       fetchConversations();
@@ -171,20 +208,27 @@ export default function ChatPage() {
         ? res.data
         : res.data?.messages || res.data?.data || [];
       setMessages(data);
+
+      if (socket && data.length > 0) {
+        const lastMsg = data[data.length - 1];
+        socket.emit('message:read', {
+          conversationId: id,
+          messageId: lastMsg.id || lastMsg._id,
+        });
+      }
     } catch (err) {
       console.error('Fetch Messages Error:', err);
       setMessages([]);
     }
   };
 
-  // ইনপুটে টাইপ করার সময় সকেটের মাধ্যমে টাইপিং সিগন্যাল পাঠানো
   const handleTypingInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     setText(e.target.value);
 
     if (socket && activeChat) {
       const activeId = activeChat.id || activeChat._id;
       
-      (socket as any).emit('typing', {
+      socket.emit('typing', {
         conversationId: activeId,
         isTyping: true,
       });
@@ -192,7 +236,7 @@ export default function ChatPage() {
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
 
       typingTimeoutRef.current = setTimeout(() => {
-        (socket as any).emit('typing', {
+        socket.emit('typing', {
           conversationId: activeId,
           isTyping: false,
         });
@@ -202,28 +246,43 @@ export default function ChatPage() {
 
   const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!text.trim() || !activeChat) return;
+    if ((!text.trim() && !selectedFile) || !activeChat) return;
 
     const activeId = activeChat.id || activeChat._id;
 
-    // টাইপিং বন্ধ করে দেওয়া মেসেজ পাঠানোর সময়
     if (socket) {
-      (socket as any).emit('typing', {
+      socket.emit('typing', {
         conversationId: activeId,
         isTyping: false,
       });
     }
 
     try {
-      const res = await api.post('/messages', {
-        conversationId: activeId,
-        text,
+      setIsUploading(true);
+      const formData = new FormData();
+      formData.append('conversationId', activeId);
+      if (text.trim()) formData.append('text', text);
+      if (selectedFile) formData.append('media', selectedFile);
+
+      const res = await api.post('/messages', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
       });
-      setMessages((prev) => [...prev, res.data]);
+
+      const newMsg = res.data;
+      setMessages((prev) => {
+        const exists = prev.some((m) => (m.id || m._id) === (newMsg.id || newMsg._id));
+        if (exists) return prev;
+        return [...prev, newMsg];
+      });
+
       setText('');
+      setSelectedFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
       fetchConversations();
     } catch (err) {
       console.error('Send Message Error:', err);
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -362,7 +421,7 @@ export default function ChatPage() {
       >
         {activeChat ? (
           <>
-            {/* Active Chat Header with Online Dot & Typing Status */}
+            {/* Active Chat Header */}
             <header className="p-3.5 md:p-4 border-b border-[#1E2436] bg-[#121829] flex items-center justify-between z-10">
               <div className="flex items-center gap-3">
                 <button
@@ -416,9 +475,48 @@ export default function ChatPage() {
               />
             </div>
 
-            {/* Message Input Bar */}
-            <footer className="p-3 md:p-4 border-t border-[#1E2436] bg-[#121829]">
+            {/* Message Input Bar with File Upload Attachment */}
+            <footer className="p-3 md:p-4 border-t border-[#1E2436] bg-[#121829] flex flex-col gap-2">
+              {/* Selected File Preview Banner */}
+              {selectedFile && (
+                <div className="flex items-center justify-between bg-[#1E2436] px-3 py-1.5 rounded-xl border border-[#2A324B] text-xs">
+                  <span className="text-violet-300 truncate max-w-[200px]">📎 {selectedFile.name}</span>
+                  <button
+                    onClick={() => {
+                      setSelectedFile(null);
+                      if (fileInputRef.current) fileInputRef.current.value = '';
+                    }}
+                    className="text-slate-400 hover:text-red-400 font-bold px-1.5"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+
               <form onSubmit={sendMessage} className="flex items-center gap-2">
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={(e) => {
+                    if (e.target.files && e.target.files[0]) {
+                      setSelectedFile(e.target.files[0]);
+                    }
+                  }}
+                  className="hidden"
+                  accept="image/*,.pdf,.doc,.docx"
+                />
+
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="p-2.5 rounded-2xl bg-[#1E2436] hover:bg-slate-800 text-slate-400 hover:text-white border border-[#2A324B] transition-all shrink-0"
+                  title="Attach Image or File"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                  </svg>
+                </button>
+
                 <input
                   type="text"
                   placeholder="Type a message..."
@@ -426,14 +524,19 @@ export default function ChatPage() {
                   onChange={handleTypingInput}
                   className="flex-1 bg-[#1E2436] border border-[#2A324B] rounded-2xl px-4 py-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-violet-500 transition-all"
                 />
+
                 <button
                   type="submit"
-                  disabled={!text.trim()}
+                  disabled={(!text.trim() && !selectedFile) || isUploading}
                   className="bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white p-3 rounded-2xl transition-all shadow-lg shadow-violet-600/30 flex items-center justify-center shrink-0 active:scale-95"
                 >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                  </svg>
+                  {isUploading ? (
+                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                  ) : (
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                    </svg>
+                  )}
                 </button>
               </form>
             </footer>
