@@ -52,7 +52,7 @@ export default function ChatPage() {
     }
   };
 
-  // 2. Socket.io Connection (Connecting to root origin as per spec)
+  // 2. Socket.io Connection & Listeners
   useEffect(() => {
     if (!token) return;
 
@@ -65,8 +65,9 @@ export default function ChatPage() {
     socketInstance.on('message:new', (newMessage: any) => {
       const currentActive = activeChatRef.current;
       const activeId = currentActive?.id || currentActive?._id;
+      const msgConvId = newMessage.conversationId || newMessage.chatId;
 
-      if (currentActive && newMessage.conversationId === activeId) {
+      if (currentActive && msgConvId === activeId) {
         setMessages((prev) => {
           const exists = prev.some((msg) => (msg.id || msg._id) === (newMessage.id || newMessage._id));
           if (exists) return prev;
@@ -86,10 +87,11 @@ export default function ChatPage() {
   }, [token]);
 
   const fetchConversations = async () => {
-    setIsLoading(true);
     try {
       const res = await api.get('/conversations');
-      const data = Array.isArray(res.data) ? res.data : res.data?.conversations || [];
+      const data = Array.isArray(res.data) 
+        ? res.data 
+        : res.data?.conversations || res.data?.data || [];
       setConversations(data);
     } catch (err: any) {
       console.error('Fetch Conversations Error:', err);
@@ -110,7 +112,9 @@ export default function ChatPage() {
     }
     try {
       const res = await api.get(`/users/search?q=${query}`);
-      const data = Array.isArray(res.data) ? res.data : res.data?.users || [];
+      const data = Array.isArray(res.data) 
+        ? res.data 
+        : res.data?.users || res.data?.data || [];
       setSearchResults(data);
     } catch (err) {
       console.error('User Search Error:', err);
@@ -123,11 +127,14 @@ export default function ChatPage() {
     try {
       const res = await api.post('/conversations', { userId });
       const chatData = res.data;
+      
+      // কনভার্সেশন লিস্ট আগে ফেচ করে স্টেট আপডেট করব, তারপর একটিভ চ্যাট সেট করব
+      await fetchConversations();
+      
       setActiveChat(chatData);
       fetchMessages(chatData.id || chatData._id);
       setSearchResults([]);
       setSearchQuery('');
-      fetchConversations();
     } catch (err) {
       console.error('Start Direct Chat Error:', err);
     }
@@ -136,8 +143,10 @@ export default function ChatPage() {
   const fetchMessages = async (id: string) => {
     if (!id) return;
     try {
-      const res = await api.get(`/conversations/${id}/messages?limit=20`);
-      const data = Array.isArray(res.data) ? res.data : res.data?.messages || [];
+      const res = await api.get(`/conversations/${id}/messages?limit=50`);
+      const data = Array.isArray(res.data) 
+        ? res.data 
+        : res.data?.messages || res.data?.data || [];
       setMessages(data);
     } catch (err) {
       console.error('Fetch Messages Error:', err);
@@ -155,16 +164,20 @@ export default function ChatPage() {
       text: text,
     };
 
-    // Sending via WebSocket as specified in the docs: message:send
+    // Socket দিয়ে মেসেজ পাঠানোর চেষ্টা
     if (socketRef.current) {
       socketRef.current.emit('message:send', messagePayload, (acknowledgement: any) => {
         if (acknowledgement && (acknowledgement.id || acknowledgement._id)) {
-          setMessages((prev) => [...prev, acknowledgement]);
+          setMessages((prev) => {
+            const exists = prev.some((m) => (m.id || m._id) === (acknowledgement.id || acknowledgement._id));
+            if (exists) return prev;
+            return [...prev, acknowledgement];
+          });
         }
       });
     }
 
-    // Fallback or secondary REST post if needed, or rely on socket acknowledgment / message:new
+    // REST API-এর মাধ্যমে মেসেজ পাঠানো নিশ্চিত করা
     try {
       const res = await api.post('/messages', messagePayload);
       const newMsg = res.data;
@@ -181,10 +194,14 @@ export default function ChatPage() {
     fetchConversations();
   };
 
+  // সাইডবারে ইউজারের সঠিক নামটি দেখানোর লজিক
   const getConversationName = (c: any) => {
     if (c.name) return c.name;
     if (c.participants && Array.isArray(c.participants)) {
-      const other = c.participants.find((p: any) => (typeof p === 'object' ? (p._id || p.id) : p) !== currentUserId);
+      const other = c.participants.find((p: any) => {
+        const pId = typeof p === 'object' ? (p._id || p.id) : p;
+        return pId !== currentUserId;
+      });
       if (other && typeof other === 'object') {
         return other.name || other.phone || 'Direct Chat';
       }
@@ -215,7 +232,7 @@ export default function ChatPage() {
           />
 
           {searchResults.length > 0 && (
-            <div className="absolute left-4 right-4 top-16 bg-[#121829] border border-[#2A324B] rounded-xl mt-1 max-h-56 overflow-y-auto z-50">
+            <div className="absolute left-4 right-4 top-16 bg-[#121829] border border-[#2A324B] rounded-xl mt-1 max-h-56 overflow-y-auto z-50 divide-y divide-[#1E2436]">
               {searchResults.map((u, idx) => (
                 <div
                   key={u.id || u._id || idx}
@@ -234,10 +251,11 @@ export default function ChatPage() {
           {isLoading ? (
             <div className="p-4 text-center text-xs text-slate-500">Loading...</div>
           ) : conversations.length === 0 ? (
-            <div className="p-4 text-center text-xs text-slate-500">No conversations found.</div>
+            <div className="p-4 text-center text-xs text-slate-500">No conversations found. Search a user to chat.</div>
           ) : (
             conversations.map((c, idx) => {
               const isActive = activeChat?.id === c.id || activeChat?._id === c._id;
+              const chatName = getConversationName(c);
               return (
                 <div
                   key={c.id || c._id || idx}
@@ -249,7 +267,7 @@ export default function ChatPage() {
                     isActive ? 'bg-violet-600/20 border border-violet-500/40 text-white' : 'hover:bg-[#1E2436] text-slate-300'
                   }`}
                 >
-                  <p className="font-semibold text-sm truncate">{getConversationName(c)}</p>
+                  <p className="font-semibold text-sm truncate">{chatName}</p>
                 </div>
               );
             })
@@ -297,7 +315,7 @@ export default function ChatPage() {
               />
               <button
                 type="submit"
-                className="bg-violet-600 hover:bg-violet-500 text-white px-5 py-2.5 rounded-xl text-sm font-semibold transition-all"
+                className="bg-violet-600 hover:bg-violet-500 text-white px-5 py-2.5 rounded-xl text-sm font-semibold transition-all cursor-pointer"
               >
                 Send
               </button>
