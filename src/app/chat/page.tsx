@@ -52,7 +52,6 @@ export default function ChatPage() {
       const savedToken = localStorage.getItem('token') || useAuthStore.getState().token;
       
       if (!savedToken) {
-        // টোকেন না থাকলে সরাসরি রিডাইরেক্ট না করে সামান্য সময় দিয়ে রি-চেক করা যেতে পারে, অথবা সরাসরি লগইন
         setTimeout(() => {
           const recheckToken = localStorage.getItem('token') || useAuthStore.getState().token;
           if (!recheckToken) {
@@ -72,7 +71,7 @@ export default function ChatPage() {
 
   const initializeUser = (savedToken: string) => {
     const userStr = localStorage.getItem('user') || localStorage.getItem('userInfo');
-    const storeUser = useAuthStore.getState().user;
+    const storeUser = useAuthStore.getState().user as any;
 
     if (userStr) {
       try {
@@ -109,7 +108,9 @@ export default function ChatPage() {
           messageId: newMessage.id || newMessage._id,
         });
 
-        const senderId = newMessage.sender?._id || newMessage.sender?.id || newMessage.sender;
+        const senderObj = newMessage.sender;
+        const senderId = typeof senderObj === 'string' ? senderObj : (senderObj?._id || senderObj?.id);
+        
         if (senderId !== currentUserId) {
           playNotificationSound();
         }
