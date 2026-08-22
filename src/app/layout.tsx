@@ -23,9 +23,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html
       lang="en"
-      className={`${display.variable} ${body.variable} h-full antialiased overflow-x-hidden`}
+      className={`${display.variable} ${body.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col font-sans overflow-x-hidden bg-[#0B0F17] text-slate-100">
+      <body className="min-h-full flex flex-col font-sans bg-[#0B0F17] text-slate-100">
         {children}
         <Toaster position="top-center" />
       </body>
