@@ -32,13 +32,27 @@ export default function ChatPage() {
   const router = useRouter();
   const socketRef = useRef<Socket | null>(null);
   const activeChatRef = useRef(activeChat);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     activeChatRef.current = activeChat;
   }, [activeChat]);
 
+  // Auto-scroll to the latest message whenever the list changes.
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
   // Helper: this API consistently uses _id, not id.
   const getId = (obj: any) => obj?._id || obj?.id;
+
+  // Sort messages oldest -> newest so new ones land at the bottom,
+  // like Messenger/WhatsApp.
+  const sortMessages = (list: any[]) =>
+    [...list].sort(
+      (a: any, b: any) =>
+        new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+    );
 
   // 1. Auth & Initial Load
   useEffect(() => {
@@ -83,7 +97,7 @@ export default function ChatPage() {
         setMessages((prev) => {
           const exists = prev.some((msg) => getId(msg) === getId(newMessage));
           if (exists) return prev;
-          return [...prev, newMessage];
+          return sortMessages([...prev, newMessage]);
         });
       }
       fetchConversations();
@@ -239,13 +253,18 @@ export default function ChatPage() {
       const data = Array.isArray(res.data)
         ? res.data
         : res.data?.data || res.data?.messages || [];
-      setMessages(data);
+      setMessages(sortMessages(data));
     } catch (err) {
       console.error('Fetch Messages Error:', err);
       setMessages([]);
     }
   };
 
+  // Sends via REST only. Sending through BOTH the socket ("message:send")
+  // AND this REST call was creating two separate messages server-side
+  // (duplicate bubbles). REST alone still triggers the "message:new"
+  // socket event from the server to every participant, so real-time
+  // delivery to the OTHER user is unaffected.
   const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!text.trim() || !activeChat) return;
@@ -255,18 +274,8 @@ export default function ChatPage() {
       conversationId: activeId,
       text: text,
     };
-
-    if (socketRef.current) {
-      socketRef.current.emit('message:send', messagePayload, (acknowledgement: any) => {
-        if (acknowledgement && getId(acknowledgement)) {
-          setMessages((prev) => {
-            const exists = prev.some((m) => getId(m) === getId(acknowledgement));
-            if (exists) return prev;
-            return [...prev, acknowledgement];
-          });
-        }
-      });
-    }
+    const outgoingText = text;
+    setText('');
 
     try {
       const res = await api.post('/messages', messagePayload);
@@ -274,13 +283,13 @@ export default function ChatPage() {
       setMessages((prev) => {
         const exists = prev.some((m) => getId(m) === getId(newMsg));
         if (exists) return prev;
-        return [...prev, newMsg];
+        return sortMessages([...prev, newMsg]);
       });
     } catch (err) {
       console.error('Send Message REST Error:', err);
+      setText(outgoingText); // failed to send — restore the draft
     }
 
-    setText('');
     fetchConversations();
   };
 
@@ -321,6 +330,11 @@ export default function ChatPage() {
   };
 
   const isGroupChat = (c: any) => c?.type === 'group' || Boolean(c?.name);
+
+  const formatTime = (createdAt: string) =>
+    createdAt
+      ? new Date(createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      : '';
 
   return (
     <div className="flex h-screen bg-[#0B0E17] text-slate-100 font-sans overflow-hidden">
@@ -453,10 +467,14 @@ export default function ChatPage() {
                       <div className={`max-w-xs md:max-w-md px-4 py-2 rounded-2xl text-sm ${isMine ? 'bg-violet-600 text-white' : 'bg-[#1E2436] text-slate-200'}`}>
                         {msg.text || msg.content}
                       </div>
+                      <span className="mt-1 px-1 text-[10px] text-slate-500">
+                        {formatTime(msg.createdAt)}
+                      </span>
                     </div>
                   );
                 })
               )}
+              <div ref={messagesEndRef} />
             </div>
 
             <form onSubmit={sendMessage} className="p-4 border-t border-[#1E2436] bg-[#121829] flex gap-2">
