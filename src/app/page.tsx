@@ -7,9 +7,9 @@ import { Footer } from '@/components/landing/Footer';
 
 export default function LandingPage() {
   return (
-    <div className="min-h-screen bg-[#0B0F17] text-slate-100 flex flex-col justify-between selection:bg-emerald-500 selection:text-white">
+    <div className="min-h-screen bg-[#0B0F17] text-slate-100 selection:bg-emerald-500 selection:text-white">
       <Navbar />
-      <main className="flex-1">
+      <main>
         <HeroSection />
         <AppPreview />
         <FeaturesSection />
