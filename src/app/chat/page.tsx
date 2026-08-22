@@ -128,7 +128,6 @@ export default function ChatPage() {
       const res = await api.post('/conversations', { userId });
       const chatData = res.data;
       
-      // কনভার্সেশন লিস্ট আগে ফেচ করে স্টেট আপডেট করব, তারপর একটিভ চ্যাট সেট করব
       await fetchConversations();
       
       setActiveChat(chatData);
@@ -164,7 +163,6 @@ export default function ChatPage() {
       text: text,
     };
 
-    // Socket দিয়ে মেসেজ পাঠানোর চেষ্টা
     if (socketRef.current) {
       socketRef.current.emit('message:send', messagePayload, (acknowledgement: any) => {
         if (acknowledgement && (acknowledgement.id || acknowledgement._id)) {
@@ -177,7 +175,6 @@ export default function ChatPage() {
       });
     }
 
-    // REST API-এর মাধ্যমে মেসেজ পাঠানো নিশ্চিত করা
     try {
       const res = await api.post('/messages', messagePayload);
       const newMsg = res.data;
@@ -194,19 +191,23 @@ export default function ChatPage() {
     fetchConversations();
   };
 
-  // সাইডবারে ইউজারের সঠিক নামটি দেখানোর লজিক
+  // নিখুঁতভাবে অপর ইউজারের নাম বা ফোন নম্বর বের করার ফাংশন
   const getConversationName = (c: any) => {
-    if (c.name) return c.name;
+    if (c.name) return c.name; // গ্রুপ হলে গ্রুপের নাম দেখাবে
+    
     if (c.participants && Array.isArray(c.participants)) {
-      const other = c.participants.find((p: any) => {
-        const pId = typeof p === 'object' ? (p._id || p.id) : p;
-        return pId !== currentUserId;
+      const otherParticipant = c.participants.find((p: any) => {
+        const pId = typeof p === 'string' ? p : (p._id || p.id);
+        return pId && pId !== currentUserId;
       });
-      if (other && typeof other === 'object') {
-        return other.name || other.phone || 'Direct Chat';
+
+      if (otherParticipant) {
+        if (typeof otherParticipant === 'object') {
+          return otherParticipant.name || otherParticipant.phone || 'Direct Chat';
+        }
       }
     }
-    return 'Chat';
+    return 'Direct Chat';
   };
 
   return (
